@@ -9,10 +9,14 @@ st.title("📈 F&O Stock Futures Analyzer")
 
 # --- Sidebar Inputs ---
 st.sidebar.header("🔧 Filter Options")
+
+
+# Minimum difference input
 min_diff = st.sidebar.number_input(
-    "Minimum Difference (₹):", min_value=0.0, max_value=1000.0, value=0.0, step=0.5
+    "Minimum Difference (₹):", min_value=-500.0, max_value=500.0, value=-2.0, step=0.5
 )
 
+# Specific stock filter (optional)
 selected_stock = st.sidebar.text_input(
     "🔍 View Specific Stock (optional)", help="Enter exact stock name (e.g. INFY, TCS)"
 )
@@ -78,27 +82,48 @@ def analyze_futures_data(df, min_diff=0.0, selected_stock=None):
         for i, expiry in enumerate(expiries[:3]):
             label = ['Current', 'Next', 'Far'][i]
             expiry_dict[label] = expiry
-            month_labels[label] = expiry.strftime('%b')
+            if i < 2:
+                month_labels[label] = expiry.strftime('%b')
 
         prices = {}
         for label, expiry in expiry_dict.items():
             row = group[group['Expiry'] == expiry]
             if not row.empty:
-                prices[label] = float(row.iloc[0]['CLOSE_PRIC'])
+                prices[label] = float(row['CLOSE_PRIC'].mean())
+                # prices[label] = float(row.iloc[0]['CLOSE_PRIC'])
                 # prices[label] = round(float(row.iloc[0]['CLOSE_PRIC']), 2)
 
 
         if 'Current' in prices and 'Next' in prices:
-            price_diff = round(prices['Current'] - prices['Next'], 2)
-            if price_diff >= min_diff:
-            # if (prices['Current'] - prices['Next']) >= min_diff:
-                result_rows.append({
-                    'Stock': stock,
-                    "Difference (₹)": price_diff,
-                    f"Current Month ({month_labels['Current']})": prices.get('Current'),
-                    f"Next Month ({month_labels['Next']})": prices.get('Next'),
-                    f"Far Next Month ({month_labels.get('Far', '-')})": prices.get('Far') if 'Far' in prices else None
-                })
+            # price_diff = round(prices['Current'] - prices['Next'], 2)
+            
+            current_price = prices['Current']
+            next_price = prices['Next']
+            price_diff = round(next_price - current_price, 2)
+            percentage_diff = round((price_diff / current_price) * 100, 2) if current_price != 0 else 0
+
+
+            if min_diff >= 0:
+                # Normal: Next ≥ Current (i.e., Next - Current ≥ min_diff)
+                if prices['Next'] - prices['Current'] >= min_diff:
+                    result_rows.append({
+                        'Stock': stock,
+                        f"Next Month ({month_labels['Next']})": prices.get('Next'),
+                        f"Current Month ({month_labels['Current']})": prices.get('Current'),
+                        "Difference (₹)": price_diff,
+                        "Difference (%)": percentage_diff
+                        # f"Far Next Month ({month_labels.get('Far', '-')})": prices.get('Far') if 'Far' in prices else None
+                    })
+            else:
+                # Unusual: Next < Current (i.e., Next - Current < min_diff, where min_diff is negative)
+                if prices['Next'] - prices['Current'] < min_diff:
+                    result_rows.append({
+                        'Stock': stock,
+                        f"Next Month ({month_labels['Next']})": prices.get('Next'),
+                        f"Current Month ({month_labels['Current']})": prices.get('Current'),
+                        "Difference (₹)": price_diff,
+                        "Difference (%)": percentage_diff
+                    })
 
     return pd.DataFrame(result_rows), None
 
@@ -123,10 +148,8 @@ if uploaded_file:
             if stock_msg:
                 st.warning(stock_msg)
             elif not result_df.empty:
-                if selected_stock:
-                    st.subheader(f"📊 Expiry Details for: {selected_stock.upper()}")
-                else:
-                    st.subheader(f"📊 Stocks where Current > Next Month by ≥ ₹{min_diff}")
+                behavior_label = "Next ≥ Current" if min_diff >= 0 else "Next < Current"
+                st.subheader(f"📊 Stocks where {behavior_label} by ₹{abs(min_diff)} or more")
 
                 st.dataframe(result_df, use_container_width=True)
 
